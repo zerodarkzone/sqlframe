@@ -773,7 +773,9 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
             for col in columns
         ]
         return self.copy(
-            expression=self.expression.select(*[x.expression for x in columns], **kwargs), **kwargs
+            expression=self.expression.select(*[x.expression for x in columns], **kwargs),
+            branch_id=self.session._random_branch_id,
+            **kwargs,
         )
 
     @operation(Operation.NO_OP)
@@ -797,7 +799,10 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
             )
         else:
             col = self._ensure_and_normalize_col(column)
-        return self.copy(expression=self.expression.where(col.expression))
+        return self.copy(
+            expression=self.expression.where(col.expression),
+            branch_id=self.session._random_branch_id,
+        )
 
     filter = where
 
@@ -1009,7 +1014,10 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
             )
             for i, (col, asc) in enumerate(col_and_ascending)
         ]
-        return self.copy(expression=self.expression.order_by(*order_by_columns))
+        return self.copy(
+            expression=self.expression.order_by(*order_by_columns),
+            branch_id=self.session._random_branch_id,
+        )
 
     sort = orderBy
 
@@ -1062,7 +1070,9 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
 
     @operation(Operation.SELECT)
     def distinct(self) -> Self:
-        return self.copy(expression=self.expression.distinct())
+        return self.copy(
+            expression=self.expression.distinct(), branch_id=self.session._random_branch_id
+        )
 
     @operation(Operation.SELECT)
     def dropDuplicates(self, subset: t.Optional[t.List[str]] = None):
