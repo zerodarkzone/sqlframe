@@ -729,21 +729,22 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
         columns = self._ensure_and_normalize_cols(cols)
         kwargs["append"] = kwargs.get("append", False)
         if self.expression.args.get("joins"):
+            join_table_identifiers = [
+                x.this for x in get_tables_from_expression_with_join(self.expression)
+            ]
+            cte_names_in_join = [x.this for x in join_table_identifiers]
+
             ambiguous_cols: t.List[exp.Column] = list(
                 flatten(
                     [
                         sub_col
                         for col in columns
                         for sub_col in col.expression.find_all(exp.Column)
-                        if not sub_col.table
+                        if not sub_col.table or sub_col.table not in cte_names_in_join
                     ]
                 )
             )
             if ambiguous_cols:
-                join_table_identifiers = [
-                    x.this for x in get_tables_from_expression_with_join(self.expression)
-                ]
-                cte_names_in_join = [x.this for x in join_table_identifiers]
                 # If we have columns that resolve to multiple CTE expressions then we want to use each CTE left-to-right
                 # and therefore we allow multiple columns with the same name in the result. This matches the behavior
                 # of Spark.
