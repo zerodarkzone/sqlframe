@@ -729,6 +729,11 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
         columns = self._ensure_and_normalize_cols(cols)
         kwargs["append"] = kwargs.get("append", False)
         if self.expression.args.get("joins"):
+            join_table_identifiers = [
+                x.this for x in get_tables_from_expression_with_join(self.expression)
+            ]
+            cte_names_in_join = [x.this for x in join_table_identifiers]
+
             ambiguous_cols: t.List[exp.Column] = list(
                 flatten(
                     [
@@ -740,10 +745,6 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
                 )
             )
             if ambiguous_cols:
-                join_table_identifiers = [
-                    x.this for x in get_tables_from_expression_with_join(self.expression)
-                ]
-                cte_names_in_join = [x.this for x in join_table_identifiers]
                 # If we have columns that resolve to multiple CTE expressions then we want to use each CTE left-to-right
                 # and therefore we allow multiple columns with the same name in the result. This matches the behavior
                 # of Spark.
@@ -765,6 +766,32 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
                     else:
                         cte = ctes_with_column[resolved_column_position[ambiguous_col]]
                     ambiguous_col.set("table", exp.to_identifier(cte.alias_or_name))
+
+            ambiguous_cols: t.List[exp.Column] = list(
+                flatten(
+                    [
+                        sub_col
+                        for col in columns
+                        for sub_col in col.expression.find_all(exp.Column)
+                        if sub_col.table and sub_col.table not in cte_names_in_join
+                    ]
+                )
+            )
+            if ambiguous_cols:
+                # If we have columns in which the identifier doesn't belong to the CTEs inside the join condition
+                # we search for the first CTE from left-to-right with that column and then use it
+                for ambiguous_col in ambiguous_cols:
+                    ctes_with_column = [
+                        cte
+                        for cte in self.expression.ctes
+                        if cte.alias_or_name in cte_names_in_join
+                        and ambiguous_col.alias_or_name in cte.this.named_selects
+                    ]
+                    # Get the firt cte with the column
+                    cte = seq_get(ctes_with_column, 0)
+                    if cte:
+                        ambiguous_col.set("table", exp.to_identifier(cte.alias_or_name))
+
         # If an expression is `CAST(x AS DATETYPE)` then we want to alias so that `x` is the result column name
         columns = [
             col.alias(col.expression.alias_or_name)
@@ -773,7 +800,9 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
             for col in columns
         ]
         return self.copy(
-            expression=self.expression.select(*[x.expression for x in columns], **kwargs), **kwargs
+            expression=self.expression.select(*[x.expression for x in columns], **kwargs),
+            branch_id=self.session._random_branch_id,
+            **kwargs,
         )
 
     @operation(Operation.NO_OP)
@@ -797,7 +826,10 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
             )
         else:
             col = self._ensure_and_normalize_col(column)
-        return self.copy(expression=self.expression.where(col.expression))
+        return self.copy(
+            expression=self.expression.where(col.expression),
+            branch_id=self.session._random_branch_id,
+        )
 
     filter = where
 
@@ -1017,7 +1049,10 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
             )
             for i, (col, asc) in enumerate(col_and_ascending)
         ]
-        return self.copy(expression=self.expression.order_by(*order_by_columns))
+        return self.copy(
+            expression=self.expression.order_by(*order_by_columns),
+            branch_id=self.session._random_branch_id,
+        )
 
     sort = orderBy
 
@@ -1070,7 +1105,9 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
 
     @operation(Operation.SELECT)
     def distinct(self) -> Self:
-        return self.copy(expression=self.expression.distinct())
+        return self.copy(
+            expression=self.expression.distinct(), branch_id=self.session._random_branch_id
+        )
 
     @operation(Operation.SELECT)
     def dropDuplicates(self, subset: t.Optional[t.List[str]] = None):
