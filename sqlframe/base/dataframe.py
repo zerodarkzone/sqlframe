@@ -740,7 +740,7 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
                         sub_col
                         for col in columns
                         for sub_col in col.expression.find_all(exp.Column)
-                        if not sub_col.table or sub_col.table not in cte_names_in_join
+                        if not sub_col.table
                     ]
                 )
             )
@@ -766,6 +766,32 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
                     else:
                         cte = ctes_with_column[resolved_column_position[ambiguous_col]]
                     ambiguous_col.set("table", exp.to_identifier(cte.alias_or_name))
+
+            ambiguous_cols: t.List[exp.Column] = list(
+                flatten(
+                    [
+                        sub_col
+                        for col in columns
+                        for sub_col in col.expression.find_all(exp.Column)
+                        if sub_col.table and sub_col.table not in cte_names_in_join
+                    ]
+                )
+            )
+            if ambiguous_cols:
+                # If we have columns in which the identifier doesn't belong to the CTEs inside the join condition
+                # we search for the first CTE from left-to-right with that column and then use it
+                for ambiguous_col in ambiguous_cols:
+                    ctes_with_column = [
+                        cte
+                        for cte in self.expression.ctes
+                        if cte.alias_or_name in cte_names_in_join
+                           and ambiguous_col.alias_or_name in cte.this.named_selects
+                    ]
+                    # Get the firt cte with the column
+                    cte = seq_get(ctes_with_column, 0)
+                    if cte:
+                        ambiguous_col.set("table", exp.to_identifier(cte.alias_or_name))
+
         # If an expression is `CAST(x AS DATETYPE)` then we want to alias so that `x` is the result column name
         columns = [
             col.alias(col.expression.alias_or_name)
