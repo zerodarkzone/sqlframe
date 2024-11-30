@@ -785,7 +785,7 @@ class _BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
                         cte
                         for cte in self.expression.ctes
                         if cte.alias_or_name in cte_names_in_join
-                           and ambiguous_col.alias_or_name in cte.this.named_selects
+                        and ambiguous_col.alias_or_name in cte.this.named_selects
                     ]
                     # Get the firt cte with the column
                     cte = seq_get(ctes_with_column, 0)
